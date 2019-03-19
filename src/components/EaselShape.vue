@@ -5,7 +5,7 @@ import _ from 'lodash';
 
 export default {
     mixins: [EaselDisplayObject],
-    props: ['form', 'fill', 'stroke', 'dimensions'],
+    props: ['form', 'fill', 'stroke', 'dimensions', 'name'],
     render() {
         return '<!-- shape -->';
     },
@@ -24,6 +24,9 @@ export default {
         refresh() {
             if (this.component) {
                 this.component.graphics.clear();
+                if (this.name) {
+                  this.component.name = this.name;
+                }
                 if (this.fill) {
                     this.component.graphics.beginFill(this.fill);
                 }
@@ -46,7 +49,7 @@ export default {
                 } else {
                     var radiuses;
                     // If 4 radius dimensions were given, use them.
-                    // Otherwise, assume just 1 radius dimension was given 
+                    // Otherwise, assume just 1 radius dimension was given
                     // and use it four times
                     if (this.dimensions.length === 6) {
                         radiuses = this.dimensions.slice(2, 6);

@@ -97,7 +97,7 @@ module.exports = createjs;
   var undefined;
 
   /** Used as the semantic version number. */
-  var VERSION = '4.17.4';
+  var VERSION = '4.17.11';
 
   /** Used as the size to enable large array optimizations. */
   var LARGE_ARRAY_SIZE = 200;
@@ -228,7 +228,6 @@ module.exports = createjs;
   /** Used to match property names within property paths. */
   var reIsDeepProp = /\.|\[(?:[^[\]]*|(["'])(?:(?!\1)[^\\]|\\.)*?\1)\]/,
       reIsPlainProp = /^\w*$/,
-      reLeadingDot = /^\./,
       rePropName = /[^.[\]]+|\[(?:(-?\d+(?:\.\d+)?)|(["'])((?:(?!\2)[^\\]|\\.)*?)\2)\]|(?=(?:\.|\[\])(?:\.|\[\]|$))/g;
 
   /**
@@ -328,8 +327,8 @@ module.exports = createjs;
       reOptMod = rsModifier + '?',
       rsOptVar = '[' + rsVarRange + ']?',
       rsOptJoin = '(?:' + rsZWJ + '(?:' + [rsNonAstral, rsRegional, rsSurrPair].join('|') + ')' + rsOptVar + reOptMod + ')*',
-      rsOrdLower = '\\d*(?:(?:1st|2nd|3rd|(?![123])\\dth)\\b)',
-      rsOrdUpper = '\\d*(?:(?:1ST|2ND|3RD|(?![123])\\dTH)\\b)',
+      rsOrdLower = '\\d*(?:1st|2nd|3rd|(?![123])\\dth)(?=\\b|[A-Z_])',
+      rsOrdUpper = '\\d*(?:1ST|2ND|3RD|(?![123])\\dTH)(?=\\b|[a-z_])',
       rsSeq = rsOptVar + reOptMod + rsOptJoin,
       rsEmoji = '(?:' + [rsDingbat, rsRegional, rsSurrPair].join('|') + ')' + rsSeq,
       rsSymbol = '(?:' + [rsNonAstral + rsCombo + '?', rsCombo, rsRegional, rsSurrPair, rsAstral].join('|') + ')';
@@ -362,7 +361,7 @@ module.exports = createjs;
   var reHasUnicode = RegExp('[' + rsZWJ + rsAstralRange  + rsComboRange + rsVarRange + ']');
 
   /** Used to detect strings that need a more robust regexp to match words. */
-  var reHasUnicodeWord = /[a-z][A-Z]|[A-Z]{2,}[a-z]|[0-9][a-zA-Z]|[a-zA-Z][0-9]|[^a-zA-Z0-9 ]/;
+  var reHasUnicodeWord = /[a-z][A-Z]|[A-Z]{2}[a-z]|[0-9][a-zA-Z]|[a-zA-Z][0-9]|[^a-zA-Z0-9 ]/;
 
   /** Used to assign default `context` object properties. */
   var contextProps = [
@@ -522,6 +521,14 @@ module.exports = createjs;
   /** Used to access faster Node.js helpers. */
   var nodeUtil = (function() {
     try {
+      // Use `util.types` for Node.js 10+.
+      var types = freeModule && freeModule.require && freeModule.require('util').types;
+
+      if (types) {
+        return types;
+      }
+
+      // Legacy `process.binding('util')` for Node.js < 10.
       return freeProcess && freeProcess.binding && freeProcess.binding('util');
     } catch (e) {}
   }());
@@ -535,34 +542,6 @@ module.exports = createjs;
       nodeIsTypedArray = nodeUtil && nodeUtil.isTypedArray;
 
   /*--------------------------------------------------------------------------*/
-
-  /**
-   * Adds the key-value `pair` to `map`.
-   *
-   * @private
-   * @param {Object} map The map to modify.
-   * @param {Array} pair The key-value pair to add.
-   * @returns {Object} Returns `map`.
-   */
-  function addMapEntry(map, pair) {
-    // Don't return `map.set` because it's not chainable in IE 11.
-    map.set(pair[0], pair[1]);
-    return map;
-  }
-
-  /**
-   * Adds `value` to `set`.
-   *
-   * @private
-   * @param {Object} set The set to modify.
-   * @param {*} value The value to add.
-   * @returns {Object} Returns `set`.
-   */
-  function addSetEntry(set, value) {
-    // Don't return `set.add` because it's not chainable in IE 11.
-    set.add(value);
-    return set;
-  }
 
   /**
    * A faster alternative to `Function#apply`, this function invokes `func`
@@ -2770,7 +2749,7 @@ module.exports = createjs;
           if (!cloneableTags[tag]) {
             return object ? value : {};
           }
-          result = initCloneByTag(value, tag, baseClone, isDeep);
+          result = initCloneByTag(value, tag, isDeep);
         }
       }
       // Check for circular references and return its corresponding clone.
@@ -2780,6 +2759,22 @@ module.exports = createjs;
         return stacked;
       }
       stack.set(value, result);
+
+      if (isSet(value)) {
+        value.forEach(function(subValue) {
+          result.add(baseClone(subValue, bitmask, customizer, subValue, value, stack));
+        });
+
+        return result;
+      }
+
+      if (isMap(value)) {
+        value.forEach(function(subValue, key) {
+          result.set(key, baseClone(subValue, bitmask, customizer, key, value, stack));
+        });
+
+        return result;
+      }
 
       var keysFunc = isFull
         ? (isFlat ? getAllKeysIn : getAllKeys)
@@ -3708,7 +3703,7 @@ module.exports = createjs;
         }
         else {
           var newValue = customizer
-            ? customizer(object[key], srcValue, (key + ''), object, source, stack)
+            ? customizer(safeGet(object, key), srcValue, (key + ''), object, source, stack)
             : undefined;
 
           if (newValue === undefined) {
@@ -3735,8 +3730,8 @@ module.exports = createjs;
      *  counterparts.
      */
     function baseMergeDeep(object, source, key, srcIndex, mergeFunc, customizer, stack) {
-      var objValue = object[key],
-          srcValue = source[key],
+      var objValue = safeGet(object, key),
+          srcValue = safeGet(source, key),
           stacked = stack.get(srcValue);
 
       if (stacked) {
@@ -3779,7 +3774,7 @@ module.exports = createjs;
           if (isArguments(objValue)) {
             newValue = toPlainObject(objValue);
           }
-          else if (!isObject(objValue) || (srcIndex && isFunction(objValue))) {
+          else if (!isObject(objValue) || isFunction(objValue)) {
             newValue = initCloneObject(srcValue);
           }
         }
@@ -4645,20 +4640,6 @@ module.exports = createjs;
     }
 
     /**
-     * Creates a clone of `map`.
-     *
-     * @private
-     * @param {Object} map The map to clone.
-     * @param {Function} cloneFunc The function to clone values.
-     * @param {boolean} [isDeep] Specify a deep clone.
-     * @returns {Object} Returns the cloned map.
-     */
-    function cloneMap(map, isDeep, cloneFunc) {
-      var array = isDeep ? cloneFunc(mapToArray(map), CLONE_DEEP_FLAG) : mapToArray(map);
-      return arrayReduce(array, addMapEntry, new map.constructor);
-    }
-
-    /**
      * Creates a clone of `regexp`.
      *
      * @private
@@ -4669,20 +4650,6 @@ module.exports = createjs;
       var result = new regexp.constructor(regexp.source, reFlags.exec(regexp));
       result.lastIndex = regexp.lastIndex;
       return result;
-    }
-
-    /**
-     * Creates a clone of `set`.
-     *
-     * @private
-     * @param {Object} set The set to clone.
-     * @param {Function} cloneFunc The function to clone values.
-     * @param {boolean} [isDeep] Specify a deep clone.
-     * @returns {Object} Returns the cloned set.
-     */
-    function cloneSet(set, isDeep, cloneFunc) {
-      var array = isDeep ? cloneFunc(setToArray(set), CLONE_DEEP_FLAG) : setToArray(set);
-      return arrayReduce(array, addSetEntry, new set.constructor);
     }
 
     /**
@@ -6287,7 +6254,7 @@ module.exports = createjs;
      */
     function initCloneArray(array) {
       var length = array.length,
-          result = array.constructor(length);
+          result = new array.constructor(length);
 
       // Add properties assigned by `RegExp#exec`.
       if (length && typeof array[0] == 'string' && hasOwnProperty.call(array, 'index')) {
@@ -6314,16 +6281,15 @@ module.exports = createjs;
      * Initializes an object clone based on its `toStringTag`.
      *
      * **Note:** This function only supports cloning values with tags of
-     * `Boolean`, `Date`, `Error`, `Number`, `RegExp`, or `String`.
+     * `Boolean`, `Date`, `Error`, `Map`, `Number`, `RegExp`, `Set`, or `String`.
      *
      * @private
      * @param {Object} object The object to clone.
      * @param {string} tag The `toStringTag` of the object to clone.
-     * @param {Function} cloneFunc The function to clone values.
      * @param {boolean} [isDeep] Specify a deep clone.
      * @returns {Object} Returns the initialized clone.
      */
-    function initCloneByTag(object, tag, cloneFunc, isDeep) {
+    function initCloneByTag(object, tag, isDeep) {
       var Ctor = object.constructor;
       switch (tag) {
         case arrayBufferTag:
@@ -6342,7 +6308,7 @@ module.exports = createjs;
           return cloneTypedArray(object, isDeep);
 
         case mapTag:
-          return cloneMap(object, isDeep, cloneFunc);
+          return new Ctor;
 
         case numberTag:
         case stringTag:
@@ -6352,7 +6318,7 @@ module.exports = createjs;
           return cloneRegExp(object);
 
         case setTag:
-          return cloneSet(object, isDeep, cloneFunc);
+          return new Ctor;
 
         case symbolTag:
           return cloneSymbol(object);
@@ -6399,10 +6365,13 @@ module.exports = createjs;
      * @returns {boolean} Returns `true` if `value` is a valid index, else `false`.
      */
     function isIndex(value, length) {
+      var type = typeof value;
       length = length == null ? MAX_SAFE_INTEGER : length;
+
       return !!length &&
-        (typeof value == 'number' || reIsUint.test(value)) &&
-        (value > -1 && value % 1 == 0 && value < length);
+        (type == 'number' ||
+          (type != 'symbol' && reIsUint.test(value))) &&
+            (value > -1 && value % 1 == 0 && value < length);
     }
 
     /**
@@ -6737,6 +6706,22 @@ module.exports = createjs;
     }
 
     /**
+     * Gets the value at `key`, unless `key` is "__proto__".
+     *
+     * @private
+     * @param {Object} object The object to query.
+     * @param {string} key The key of the property to get.
+     * @returns {*} Returns the property value.
+     */
+    function safeGet(object, key) {
+      if (key == '__proto__') {
+        return;
+      }
+
+      return object[key];
+    }
+
+    /**
      * Sets metadata for `func`.
      *
      * **Note:** If this function becomes hot, i.e. is invoked a lot in a short
@@ -6852,11 +6837,11 @@ module.exports = createjs;
      */
     var stringToPath = memoizeCapped(function(string) {
       var result = [];
-      if (reLeadingDot.test(string)) {
+      if (string.charCodeAt(0) === 46 /* . */) {
         result.push('');
       }
-      string.replace(rePropName, function(match, number, quote, string) {
-        result.push(quote ? string.replace(reEscapeChar, '$1') : (number || match));
+      string.replace(rePropName, function(match, number, quote, subString) {
+        result.push(quote ? subString.replace(reEscapeChar, '$1') : (number || match));
       });
       return result;
     });
@@ -10466,9 +10451,11 @@ module.exports = createjs;
       function remainingWait(time) {
         var timeSinceLastCall = time - lastCallTime,
             timeSinceLastInvoke = time - lastInvokeTime,
-            result = wait - timeSinceLastCall;
+            timeWaiting = wait - timeSinceLastCall;
 
-        return maxing ? nativeMin(result, maxWait - timeSinceLastInvoke) : result;
+        return maxing
+          ? nativeMin(timeWaiting, maxWait - timeSinceLastInvoke)
+          : timeWaiting;
       }
 
       function shouldInvoke(time) {
@@ -12902,9 +12889,35 @@ module.exports = createjs;
      * _.defaults({ 'a': 1 }, { 'b': 2 }, { 'a': 3 });
      * // => { 'a': 1, 'b': 2 }
      */
-    var defaults = baseRest(function(args) {
-      args.push(undefined, customDefaultsAssignIn);
-      return apply(assignInWith, undefined, args);
+    var defaults = baseRest(function(object, sources) {
+      object = Object(object);
+
+      var index = -1;
+      var length = sources.length;
+      var guard = length > 2 ? sources[2] : undefined;
+
+      if (guard && isIterateeCall(sources[0], sources[1], guard)) {
+        length = 1;
+      }
+
+      while (++index < length) {
+        var source = sources[index];
+        var props = keysIn(source);
+        var propsIndex = -1;
+        var propsLength = props.length;
+
+        while (++propsIndex < propsLength) {
+          var key = props[propsIndex];
+          var value = object[key];
+
+          if (value === undefined ||
+              (eq(value, objectProto[key]) && !hasOwnProperty.call(object, key))) {
+            object[key] = source[key];
+          }
+        }
+      }
+
+      return object;
     });
 
     /**
@@ -13301,6 +13314,11 @@ module.exports = createjs;
      * // => { '1': 'c', '2': 'b' }
      */
     var invert = createInverter(function(result, value, key) {
+      if (value != null &&
+          typeof value.toString != 'function') {
+        value = nativeObjectToString.call(value);
+      }
+
       result[value] = key;
     }, constant(identity));
 
@@ -13331,6 +13349,11 @@ module.exports = createjs;
      * // => { 'group1': ['a', 'c'], 'group2': ['b'] }
      */
     var invertBy = createInverter(function(result, value, key) {
+      if (value != null &&
+          typeof value.toString != 'function') {
+        value = nativeObjectToString.call(value);
+      }
+
       if (hasOwnProperty.call(result, value)) {
         result[value].push(key);
       } else {
@@ -17403,6 +17426,17 @@ module.exports = {
 |
 */
 
+// Need to add and test these events for Canvas
+// * drawend
+// * drawstart
+// * mouseenter
+// * mouseleave
+// * stagemousedown
+// * stagemousemove
+// * stagemouseup
+// * tickend
+// * tickstart
+
 
 
 var eventTypes = [
@@ -17561,7 +17595,7 @@ var Component = __webpack_require__(2)(
   /* cssModules */
   null
 )
-Component.options.__file = "/home/dkuck/work/vue-easeljs/public/src/components/EaselBitmap.vue"
+Component.options.__file = "/Users/cxwcfea/Myfile/code/mygit/vue-easeljs/src/components/EaselBitmap.vue"
 if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
 
 /* hot reload */
@@ -17571,9 +17605,9 @@ if (false) {(function () {
   if (!hotAPI.compatible) return
   module.hot.accept()
   if (!module.hot.data) {
-    hotAPI.createRecord("data-v-4cb7e147", Component.options)
+    hotAPI.createRecord("data-v-744c5688", Component.options)
   } else {
-    hotAPI.reload("data-v-4cb7e147", Component.options)
+    hotAPI.reload("data-v-744c5688", Component.options)
   }
 })()}
 
@@ -17588,13 +17622,13 @@ var Component = __webpack_require__(2)(
   /* script */
   __webpack_require__(16),
   /* template */
-  __webpack_require__(27),
+  __webpack_require__(29),
   /* scopeId */
   null,
   /* cssModules */
   null
 )
-Component.options.__file = "/home/dkuck/work/vue-easeljs/public/src/components/EaselCanvas.vue"
+Component.options.__file = "/Users/cxwcfea/Myfile/code/mygit/vue-easeljs/src/components/EaselCanvas.vue"
 if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
 if (Component.options.functional) {console.error("[vue-loader] EaselCanvas.vue: functional components are not supported with templates, they should use render functions.")}
 
@@ -17605,9 +17639,9 @@ if (false) {(function () {
   if (!hotAPI.compatible) return
   module.hot.accept()
   if (!module.hot.data) {
-    hotAPI.createRecord("data-v-0bd928f0", Component.options)
+    hotAPI.createRecord("data-v-f609c736", Component.options)
   } else {
-    hotAPI.reload("data-v-0bd928f0", Component.options)
+    hotAPI.reload("data-v-f609c736", Component.options)
   }
 })()}
 
@@ -17628,7 +17662,7 @@ var Component = __webpack_require__(2)(
   /* cssModules */
   null
 )
-Component.options.__file = "/home/dkuck/work/vue-easeljs/public/src/components/EaselContainer.vue"
+Component.options.__file = "/Users/cxwcfea/Myfile/code/mygit/vue-easeljs/src/components/EaselContainer.vue"
 if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
 if (Component.options.functional) {console.error("[vue-loader] EaselContainer.vue: functional components are not supported with templates, they should use render functions.")}
 
@@ -17639,9 +17673,9 @@ if (false) {(function () {
   if (!hotAPI.compatible) return
   module.hot.accept()
   if (!module.hot.data) {
-    hotAPI.createRecord("data-v-5cc64999", Component.options)
+    hotAPI.createRecord("data-v-9a9eb3f8", Component.options)
   } else {
-    hotAPI.reload("data-v-5cc64999", Component.options)
+    hotAPI.reload("data-v-9a9eb3f8", Component.options)
   }
 })()}
 
@@ -17662,7 +17696,7 @@ var Component = __webpack_require__(2)(
   /* cssModules */
   null
 )
-Component.options.__file = "/home/dkuck/work/vue-easeljs/public/src/components/EaselShape.vue"
+Component.options.__file = "/Users/cxwcfea/Myfile/code/mygit/vue-easeljs/src/components/EaselShape.vue"
 if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
 
 /* hot reload */
@@ -17672,9 +17706,9 @@ if (false) {(function () {
   if (!hotAPI.compatible) return
   module.hot.accept()
   if (!module.hot.data) {
-    hotAPI.createRecord("data-v-f9f5868e", Component.options)
+    hotAPI.createRecord("data-v-02cc86a4", Component.options)
   } else {
-    hotAPI.reload("data-v-f9f5868e", Component.options)
+    hotAPI.reload("data-v-02cc86a4", Component.options)
   }
 })()}
 
@@ -17695,7 +17729,7 @@ var Component = __webpack_require__(2)(
   /* cssModules */
   null
 )
-Component.options.__file = "/home/dkuck/work/vue-easeljs/public/src/components/EaselSprite.vue"
+Component.options.__file = "/Users/cxwcfea/Myfile/code/mygit/vue-easeljs/src/components/EaselSprite.vue"
 if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
 
 /* hot reload */
@@ -17705,9 +17739,9 @@ if (false) {(function () {
   if (!hotAPI.compatible) return
   module.hot.accept()
   if (!module.hot.data) {
-    hotAPI.createRecord("data-v-0fed37dd", Component.options)
+    hotAPI.createRecord("data-v-ede1a95c", Component.options)
   } else {
-    hotAPI.reload("data-v-0fed37dd", Component.options)
+    hotAPI.reload("data-v-ede1a95c", Component.options)
   }
 })()}
 
@@ -17722,13 +17756,13 @@ var Component = __webpack_require__(2)(
   /* script */
   __webpack_require__(20),
   /* template */
-  __webpack_require__(29),
+  __webpack_require__(27),
   /* scopeId */
   null,
   /* cssModules */
   null
 )
-Component.options.__file = "/home/dkuck/work/vue-easeljs/public/src/components/EaselSpriteSheet.vue"
+Component.options.__file = "/Users/cxwcfea/Myfile/code/mygit/vue-easeljs/src/components/EaselSpriteSheet.vue"
 if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
 if (Component.options.functional) {console.error("[vue-loader] EaselSpriteSheet.vue: functional components are not supported with templates, they should use render functions.")}
 
@@ -17739,9 +17773,9 @@ if (false) {(function () {
   if (!hotAPI.compatible) return
   module.hot.accept()
   if (!module.hot.data) {
-    hotAPI.createRecord("data-v-b0f5339c", Component.options)
+    hotAPI.createRecord("data-v-2c4a53dd", Component.options)
   } else {
-    hotAPI.reload("data-v-b0f5339c", Component.options)
+    hotAPI.reload("data-v-2c4a53dd", Component.options)
   }
 })()}
 
@@ -17762,7 +17796,7 @@ var Component = __webpack_require__(2)(
   /* cssModules */
   null
 )
-Component.options.__file = "/home/dkuck/work/vue-easeljs/public/src/components/EaselText.vue"
+Component.options.__file = "/Users/cxwcfea/Myfile/code/mygit/vue-easeljs/src/components/EaselText.vue"
 if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
 
 /* hot reload */
@@ -17772,9 +17806,9 @@ if (false) {(function () {
   if (!hotAPI.compatible) return
   module.hot.accept()
   if (!module.hot.data) {
-    hotAPI.createRecord("data-v-26f37376", Component.options)
+    hotAPI.createRecord("data-v-7d0892fa", Component.options)
   } else {
-    hotAPI.reload("data-v-26f37376", Component.options)
+    hotAPI.reload("data-v-7d0892fa", Component.options)
   }
 })()}
 
@@ -17969,7 +18003,7 @@ module.exports = Component.exports
 
 /* harmony default export */ exports["default"] = {
     mixins: [__WEBPACK_IMPORTED_MODULE_1__mixins_EaselDisplayObject_js___default.a],
-    props: ['form', 'fill', 'stroke', 'dimensions'],
+    props: ['form', 'fill', 'stroke', 'dimensions', 'name'],
     render: function render() {
         return '<!-- shape -->';
     },
@@ -17988,6 +18022,9 @@ module.exports = Component.exports
         refresh: function refresh() {
             if (this.component) {
                 this.component.graphics.clear();
+                if (this.name) {
+                  this.component.name = this.name;
+                }
                 if (this.fill) {
                     this.component.graphics.beginFill(this.fill);
                 }
@@ -18010,7 +18047,7 @@ module.exports = Component.exports
                 } else {
                     var radiuses;
                     // If 4 radius dimensions were given, use them.
-                    // Otherwise, assume just 1 radius dimension was given 
+                    // Otherwise, assume just 1 radius dimension was given
                     // and use it four times
                     if (this.dimensions.length === 6) {
                         radiuses = this.dimensions.slice(2, 6);
@@ -50456,15 +50493,13 @@ window.createjs = window.createjs || {};
 /***/ function(module, exports, __webpack_require__) {
 
 module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;var _c=_vm._self._c||_h;
-  return _c('canvas', {
-    ref: "easel"
-  }, [_vm._t("default")], 2)
+  return _c('span', [_vm._t("default")], 2)
 },staticRenderFns: []}
 module.exports.render._withStripped = true
 if (false) {
   module.hot.accept()
   if (module.hot.data) {
-     require("vue-hot-reload-api").rerender("data-v-0bd928f0", module.exports)
+     require("vue-hot-reload-api").rerender("data-v-2c4a53dd", module.exports)
   }
 }
 
@@ -50479,7 +50514,7 @@ module.exports.render._withStripped = true
 if (false) {
   module.hot.accept()
   if (module.hot.data) {
-     require("vue-hot-reload-api").rerender("data-v-5cc64999", module.exports)
+     require("vue-hot-reload-api").rerender("data-v-9a9eb3f8", module.exports)
   }
 }
 
@@ -50488,13 +50523,15 @@ if (false) {
 /***/ function(module, exports, __webpack_require__) {
 
 module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;var _c=_vm._self._c||_h;
-  return _c('span', [_vm._t("default")], 2)
+  return _c('canvas', {
+    ref: "easel"
+  }, [_vm._t("default")], 2)
 },staticRenderFns: []}
 module.exports.render._withStripped = true
 if (false) {
   module.hot.accept()
   if (module.hot.data) {
-     require("vue-hot-reload-api").rerender("data-v-b0f5339c", module.exports)
+     require("vue-hot-reload-api").rerender("data-v-f609c736", module.exports)
   }
 }
 
