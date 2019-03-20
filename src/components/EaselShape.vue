@@ -69,6 +69,8 @@ export default {
                 return Promise.resolve(new easeljs.Rectangle(0, 0, this.dimensions * 2, this.dimensions * 2));
             } else if (this.form === 'star') {
                 return Promise.resolve(new easeljs.Rectangle(0, 0, this.dimensions[0] * 2, this.dimensions[0] * 2));
+            } else if (this.form === 'other') {
+                return Promise.resolve(new easeljs.Rectangle(0, 0, 0, 0));
             }
             return Promise.reject('No bounds available');
         },

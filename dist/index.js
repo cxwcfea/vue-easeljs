@@ -18067,6 +18067,8 @@ module.exports = Component.exports
                 return Promise.resolve(new __WEBPACK_IMPORTED_MODULE_0__easel_js___default.a.Rectangle(0, 0, this.dimensions * 2, this.dimensions * 2));
             } else if (this.form === 'star') {
                 return Promise.resolve(new __WEBPACK_IMPORTED_MODULE_0__easel_js___default.a.Rectangle(0, 0, this.dimensions[0] * 2, this.dimensions[0] * 2));
+            } else if (this.form === 'other') {
+                return Promise.resolve(new __WEBPACK_IMPORTED_MODULE_0__easel_js___default.a.Rectangle(0, 0, 0, 0));
             }
             return Promise.reject('No bounds available');
         },
